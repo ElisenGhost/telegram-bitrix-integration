@@ -1,7 +1,6 @@
 {
   "name": "telegram-bitrix-integration",
   "version": "1.0.0",
-  "type": "module",
   "description": "Telegram bot <-> Bitrix24 smart process integration (Node.js/Express).",
   "main": "server.js",
   "scripts": {
