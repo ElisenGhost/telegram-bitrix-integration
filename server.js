@@ -15,24 +15,41 @@ const B24_WEBHOOK_USER = process.env.B24_WEBHOOK_USER;
 const B24_WEBHOOK_KEY = process.env.B24_WEBHOOK_KEY;
 const SPA_TYPE_ID = Number(process.env.SPA_TYPE_ID);
 
+// Код пользовательского поля Telegram ID в SPA
 const TELEGRAM_FIELD = "UF_CRM_TELEGRAM_CHAT_ID";
 
 const BITRIX_WEBHOOK_URL = `https://${B24_DOMAIN}/rest/${B24_WEBHOOK_USER}/${B24_WEBHOOK_KEY}`;
 
+if (!TG_TOKEN || !B24_DOMAIN || !B24_WEBHOOK_USER || !B24_WEBHOOK_KEY || !SPA_TYPE_ID) {
+  console.error("❌ ERROR: Missing environment variables");
+  process.exit(1);
+}
+
 // === Поиск активной заявки ===
 async function findActiveItem(chatId) {
-  const response = await axios.post(
-    `${BITRIX_WEBHOOK_URL}/crm.item.list.json`,
-    {
-      entityTypeId: SPA_TYPE_ID,
-      filter: {
-        [TELEGRAM_FIELD]: chatId,
-        "=STAGE_ID": "DT" + SPA_TYPE_ID + ":NEW" // Стадия NEW (можно поменять)
+  try {
+    const response = await axios.post(
+      `${BITRIX_WEBHOOK_URL}/crm.item.list.json`,
+      {
+        entityTypeId: SPA_TYPE_ID,
+        select: ["ID", TELEGRAM_FIELD, "STAGE_ID"],
+        order: { ID: "DESC" },
+        start: 0,
       }
-    }
-  );
+    );
 
-  return response.data.result.items[0] || null;
+    // Фильтруем на сервере
+    const activeItem = response.data.result.items.find(
+      item =>
+        item[TELEGRAM_FIELD] == chatId &&
+        item.STAGE_ID !== "closed" // замените "closed" на вашу закрытую стадию
+    );
+
+    return activeItem || null;
+  } catch (err) {
+    console.error("Error fetching items:", err.response?.data || err.message);
+    return null;
+  }
 }
 
 // === Создание заявки ===
@@ -47,7 +64,6 @@ async function createItem(chatId, text) {
       }
     }
   );
-
   return response.data.result;
 }
 
@@ -74,13 +90,13 @@ app.post("/telegram/webhook", async (req, res) => {
     const chatId = message.chat.id;
     const text = message.text;
 
-    console.log("Message:", chatId, text);
+    console.log("Message from Telegram:", chatId, text);
 
     let item = await findActiveItem(chatId);
 
     if (item) {
-      console.log("Active ticket found:", item.id);
-      await addComment(item.id, "👤 Telegram: " + text);
+      console.log("Active ticket found:", item.ID);
+      await addComment(item.ID, "👤 Telegram: " + text);
     } else {
       console.log("Creating new ticket");
       const itemId = await createItem(chatId, text);
@@ -91,7 +107,7 @@ app.post("/telegram/webhook", async (req, res) => {
       `https://api.telegram.org/bot${TG_TOKEN}/sendMessage`,
       {
         chat_id: chatId,
-        text: "Сообщение добавлено к вашей заявке ✅"
+        text: "✅ Ваше сообщение добавлено к вашей заявке"
       }
     );
 
@@ -102,6 +118,11 @@ app.post("/telegram/webhook", async (req, res) => {
   }
 });
 
+// Просто для проверки
+app.get("/", (req, res) => {
+  res.send("Server is running");
+});
+
 app.listen(PORT, () => {
-  console.log("Server started on port", PORT);
+  console.log(`🚀 Server started on port ${PORT}`);
 });
