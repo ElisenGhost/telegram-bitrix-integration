@@ -15,8 +15,11 @@ const B24_WEBHOOK_USER = process.env.B24_WEBHOOK_USER;
 const B24_WEBHOOK_KEY = process.env.B24_WEBHOOK_KEY;
 const SPA_TYPE_ID = Number(process.env.SPA_TYPE_ID);
 
-// Код пользовательского поля Telegram ID в SPA
+// Поле Telegram ID в SPA
 const TELEGRAM_FIELD = "UF_CRM_TELEGRAM_CHAT_ID";
+
+// Стадия закрытой заявки (замени на свою)
+const CLOSED_STAGE_ID = "DT1076:CLOSE"; // пример, нужно взять из SPA
 
 const BITRIX_WEBHOOK_URL = `https://${B24_DOMAIN}/rest/${B24_WEBHOOK_USER}/${B24_WEBHOOK_KEY}`;
 
@@ -25,7 +28,7 @@ if (!TG_TOKEN || !B24_DOMAIN || !B24_WEBHOOK_USER || !B24_WEBHOOK_KEY || !SPA_TY
   process.exit(1);
 }
 
-// === Поиск активной заявки ===
+// === Получение последних заявок и поиск активной ===
 async function findActiveItem(chatId) {
   try {
     const response = await axios.post(
@@ -38,11 +41,10 @@ async function findActiveItem(chatId) {
       }
     );
 
-    // Фильтруем на сервере
-    const activeItem = response.data.result.items.find(
-      item =>
-        item[TELEGRAM_FIELD] == chatId &&
-        item.STAGE_ID !== "closed" // замените "closed" на вашу закрытую стадию
+    const items = response.data.result.items;
+
+    const activeItem = items.find(
+      i => i[TELEGRAM_FIELD] == chatId && i.STAGE_ID !== CLOSED_STAGE_ID
     );
 
     return activeItem || null;
@@ -52,7 +54,7 @@ async function findActiveItem(chatId) {
   }
 }
 
-// === Создание заявки ===
+// === Создание новой заявки ===
 async function createItem(chatId, text) {
   const response = await axios.post(
     `${BITRIX_WEBHOOK_URL}/crm.item.add.json`,
@@ -64,17 +66,17 @@ async function createItem(chatId, text) {
       }
     }
   );
-  return response.data.result;
+
+  return response.data.result; // ID новой заявки
 }
 
-// === Добавление комментария ===
+// === Добавление комментария в заявку ===
 async function addComment(itemId, text) {
   await axios.post(
-    `${BITRIX_WEBHOOK_URL}/crm.timeline.comment.add.json`,
+    `${BITRIX_WEBHOOK_URL}/crm.item.comment.add.json`,
     {
       fields: {
-        ENTITY_ID: itemId,
-        ENTITY_TYPE: "smart_process",
+        ITEM_ID: itemId,
         COMMENT: text
       }
     }
@@ -118,7 +120,7 @@ app.post("/telegram/webhook", async (req, res) => {
   }
 });
 
-// Просто для проверки
+// Проверка сервера
 app.get("/", (req, res) => {
   res.send("Server is running");
 });
