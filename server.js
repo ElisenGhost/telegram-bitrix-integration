@@ -1,46 +1,74 @@
-const express = require('express');
-const bodyParser = require('body-parser');
-const axios = require('axios');
-require('dotenv').config();
+import express from "express";
+import axios from "axios";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const app = express();
-app.use(bodyParser.json());
+app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-app.post('/telegram/webhook', async (req, res) => {
-    try {
-        const message = req.body.message;
-        if (!message) {
-            console.log("No message in body:", req.body);
-            return res.sendStatus(200);
-        }
+const TG_TOKEN = process.env.TG_TOKEN;
+const B24_DOMAIN = process.env.B24_DOMAIN;
+const B24_WEBHOOK_USER = process.env.B24_WEBHOOK_USER;
+const B24_WEBHOOK_KEY = process.env.B24_WEBHOOK_KEY;
+const SPA_TYPE_ID = Number(process.env.SPA_TYPE_ID);
 
-        const chatId = message.chat.id;
-        const text = message.text;
+const BITRIX_WEBHOOK_URL = `https://${B24_DOMAIN}/rest/${B24_WEBHOOK_USER}/${B24_WEBHOOK_KEY}`;
 
-        console.log("Received message from Telegram:", chatId, text);
+if (!TG_TOKEN || !B24_DOMAIN || !B24_WEBHOOK_USER || !B24_WEBHOOK_KEY || !SPA_TYPE_ID) {
+  console.error("❌ ERROR: Missing environment variables");
+  process.exit(1);
+}
 
-        // Отправка в Bitrix
-        const response = await axios.post(
-            `https://${process.env.B24_DOMAIN}/rest/${process.env.B24_WEBHOOK_USER}/${process.env.B24_WEBHOOK_KEY}/crm.item.add`,
-            {
-                fields: {
-                    TITLE: text,
-                    SPA_TYPE_ID: process.env.SPA_TYPE_ID
-                }
-            }
-        );
+app.post("/telegram/webhook", async (req, res) => {
+  try {
+    const message = req.body.message;
 
-        console.log("Bitrix response:", response.data);
-        res.sendStatus(200);
-
-    } catch (err) {
-        console.error("Internal error:", err.response ? err.response.data : err.message);
-        res.status(500).send("Internal Server Error");
+    if (!message || !message.text) {
+      return res.sendStatus(200);
     }
+
+    const chatId = message.chat.id;
+    const text = message.text;
+
+    console.log("Received message from Telegram:", chatId, text);
+    console.log("Creating SPA with entityTypeId:", SPA_TYPE_ID);
+
+    // СОЗДАНИЕ СМАРТ-ПРОЦЕССА
+    const bitrixResponse = await axios.post(
+      `${BITRIX_WEBHOOK_URL}/crm.item.add.json`,
+      {
+        entityTypeId: SPA_TYPE_ID,
+        fields: {
+          TITLE: text,
+        },
+      }
+    );
+
+    console.log("Bitrix response:", bitrixResponse.data);
+
+    // Ответ пользователю
+    await axios.post(
+      `https://api.telegram.org/bot${TG_TOKEN}/sendMessage`,
+      {
+        chat_id: chatId,
+        text: "✅ Ваша заявка создана!",
+      }
+    );
+
+    res.sendStatus(200);
+  } catch (error) {
+    console.error("Internal error:", error.response?.data || error.message);
+    res.sendStatus(500);
+  }
+});
+
+app.get("/", (req, res) => {
+  res.send("Server is working");
 });
 
 app.listen(PORT, () => {
-    console.log(`Server started on port ${PORT}`);
+  console.log(`🚀 Server started on port ${PORT}`);
 });
